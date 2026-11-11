@@ -1,0 +1,41 @@
+# Mirrors the job names that the eng-stats MergeQueueMetrics query reads from microsoft/vscode's Code OSS workflow.
+# Failure switches act only in the merge queue (merge_group), so PR checks stay green:
+#   FAIL file      -> Linux job fails (failed_checks)
+#   MQ_FAIL var    -> Linux job fails without a code change (a flake when requeued after the variable is cleared)
+#   SLOW file      -> Linux job outlives the queue's check timeout (checks_timed_out)
+name: Code OSS
+on:
+  pull_request:
+  merge_group:
+permissions:
+  contents: read
+jobs:
+  hygiene:
+    name: Compile & Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "hygiene ok"
+  linux:
+    name: Linux / Electron
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Merge queue switches
+        if: github.event_name == 'merge_group'
+        env:
+          MQ_FAIL: ${{ vars.MQ_FAIL }}
+        run: |
+          if [ -f FAIL ]; then echo "FAIL marker present"; exit 1; fi
+          if [ "$MQ_FAIL" = "true" ]; then echo "MQ_FAIL is set"; exit 1; fi
+          if [ -f SLOW ]; then echo "SLOW marker present"; sleep 600; fi
+          echo "linux ok"
+  gate:
+    name: PR Gate
+    needs: [hygiene, linux]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "hygiene=${{ needs.hygiene.result }} linux=${{ needs.linux.result }}"
+          [ "${{ needs.hygiene.result }}" = "success" ] && [ "${{ needs.linux.result }}" = "success" ]
